@@ -17,7 +17,7 @@ const ExpenseHistory = ({ expenses }) => {
         <tbody>
           {expenses.map((expense, index) => (
             <tr key={expense.id}>
-              <td>{index + 1}</td> {/* Display row number starting from 1 */}
+              <td>{index + 1}</td>
               <td>{expense.category}</td>
               <td>${expense.amount}</td>
             </tr>

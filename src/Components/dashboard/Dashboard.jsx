@@ -1,17 +1,34 @@
 // src/Components/Dashboard/Dashboard.jsx
-import React, { useEffect, useState } from 'react';
-import { Container, Row, Col, Navbar, Nav, ProgressBar, Button, Form, Dropdown } from 'react-bootstrap';
-import { FiLogOut } from 'react-icons/fi';
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  Container,
+  Row,
+  Col,
+  Navbar,
+  Nav,
+  ProgressBar,
+  Button,
+  Dropdown,
+  Modal,
+  Spinner,
+  Alert,
+  Form,
+} from 'react-bootstrap';
+import { FiLogOut, FiCamera } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
 import { Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { confirmAlert } from 'react-confirm-alert';
-import jsPDF from 'jspdf'; // Import jsPDF library
+import jsPDF from 'jspdf';
+import { QrReader } from 'react-qr-reader';
+import { motion } from 'framer-motion';
 import 'react-confirm-alert/src/react-confirm-alert.css';
+import 'bootstrap/dist/css/bootstrap.min.css';
 import AddNewExpense from './AddNewExpense';
 import ExpenseOverview from './ExpenseOverview';
 import ExpenseHistory from './ExpenseHistory';
 import axios from 'axios';
+import { MdQrCodeScanner } from "react-icons/md";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -21,7 +38,15 @@ const Dashboard = () => {
   const [expenses, setExpenses] = useState([]);
   const [newExpense, setNewExpense] = useState({ category: '', amount: '' });
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [filter, setFilter] = useState('monthly'); // Track filter type
+  const [filter, setFilter] = useState('monthly');
+  const [showScanner, setShowScanner] = useState(false);
+  const [scanResult, setScanResult] = useState('');
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedResult, setEditedResult] = useState('');
+  const [error, setError] = useState('');
+  const [isAddingToDB, setIsAddingToDB] = useState(false);
+  const scanHandled = useRef(false);
 
   const backendUrl = process.env.REACT_APP_BACKEND_URL;
 
@@ -120,9 +145,57 @@ const Dashboard = () => {
     doc.save('expense-report.pdf');
   };
 
+  const handleScan = (result, error) => {
+    if (result && !scanHandled.current) {
+      scanHandled.current = true;
+      setScanResult(result.text);
+      setEditedResult(result.text);
+      setShowScanModal(true);
+      setShowScanner(false);
+    }
+    if (error && error.name !== 'NotFoundException') {
+      setError('');
+    }
+  };
+
+  const handleAddToDB = async () => {
+    setIsAddingToDB(true);
+    try {
+      const response = await axios.post(`${backendUrl}/api/scan`, {
+        data: editedResult,
+      });
+      if (response.status === 201) {
+        alert('Data added to DB successfully!');
+        handleCloseScanModal();
+      } else {
+        alert(`Error: ${response.data.message}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to add data to DB.');
+    }
+    setIsAddingToDB(false);
+  };
+
+  const handleEdit = () => {
+    setIsEditing(true);
+  };
+
+  const handleCloseScanModal = () => {
+    setShowScanModal(false);
+    setError('');
+    setIsEditing(false);
+    scanHandled.current = false;
+  };
+
+  const handleScannerClose = () => {
+    setShowScanner(false);
+    scanHandled.current = false;
+  };
+
   return (
-    <Container fluid className="p-0">
-      <Navbar bg="light" expand="lg" className="shadow-sm">
+    <>
+      <Navbar bg="dark" variant="dark" expand="lg">
         <Container>
           <Navbar.Brand>Dashboard</Navbar.Brand>
           <Nav className="ms-auto">
@@ -163,12 +236,24 @@ const Dashboard = () => {
         </Row>
 
         <Row className="mb-4">
-          <Col md={6}>
+          <Col md={6} className="position-relative">
             <AddNewExpense
               newExpense={newExpense}
               setNewExpense={setNewExpense}
               handleAddExpense={handleAddExpense}
             />
+            <div
+  className="position-absolute text-center"
+  style={{ top: '22px', right: '30px', cursor: 'pointer' }}
+  onClick={() => setShowScanner(true)}
+>
+  <MdQrCodeScanner
+    size={30}
+    color="#007bff"
+    title="Scan QR Code"
+  />
+  <small style={{ display: 'block' }}>Scan QR Code</small>
+</div>
           </Col>
           <Col md={6}>
             <ExpenseOverview chartData={chartData} />
@@ -198,7 +283,77 @@ const Dashboard = () => {
           </div>
         )}
       </Container>
-    </Container>
+
+      {/* Scanner Modal */}
+      <Modal show={showScanner} onHide={handleScannerClose} centered>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+        >
+          <Modal.Header closeButton>
+            <Modal.Title>Scan QR Code</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <QrReader
+              onResult={handleScan}
+              constraints={{ facingMode: 'environment' }}
+              style={{ width: '100%', borderRadius: '10px' }}
+            />
+            {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
+          </Modal.Body>
+        </motion.div>
+      </Modal>
+
+      {/* Scan Result Modal */}
+      <Modal show={showScanModal} onHide={handleCloseScanModal} centered>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+        >
+          <Modal.Header closeButton>
+            <Modal.Title>Scan Result</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            {isEditing ? (
+              <Form>
+                <Form.Group controlId="formScanResult">
+                  <Form.Label>Edit Scan Result</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={3}
+                    value={editedResult}
+                    onChange={(e) => setEditedResult(e.target.value)}
+                  />
+                </Form.Group>
+              </Form>
+            ) : (
+              <p>{scanResult}</p>
+            )}
+          </Modal.Body>
+          <Modal.Footer>
+            {isEditing ? (
+              <Button variant="success" onClick={handleAddToDB} disabled={isAddingToDB}>
+                {isAddingToDB ? <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" /> : 'Add to DB'}
+              </Button>
+            ) : (
+              <>
+                <Button variant="primary" onClick={handleEdit}>
+                  Edit
+                </Button>
+                <Button variant="success" onClick={handleAddToDB}>
+                  Add to DB
+                </Button>
+              </>
+            )}
+            <Button variant="secondary" onClick={handleCloseScanModal}>
+              Close
+            </Button>
+          </Modal.Footer>
+        </motion.div>
+      </Modal>
+    </>
   );
 };
 
