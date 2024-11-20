@@ -14,14 +14,16 @@ import {
   Alert,
   Form,
 } from 'react-bootstrap';
-import { FiLogOut, FiCamera } from 'react-icons/fi';
+import { FiLogOut } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
 import { Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { confirmAlert } from 'react-confirm-alert';
 import jsPDF from 'jspdf';
 import { QrReader } from 'react-qr-reader';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import Swal from 'sweetalert2';
+import withReactContent from 'sweetalert2-react-content';
 import 'react-confirm-alert/src/react-confirm-alert.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import AddNewExpense from './AddNewExpense';
@@ -30,7 +32,11 @@ import ExpenseHistory from './ExpenseHistory';
 import axios from 'axios';
 import { MdQrCodeScanner } from "react-icons/md";
 
+// Register ChartJS components
 ChartJS.register(ArcElement, Tooltip, Legend);
+
+// Initialize SweetAlert2 with React Content
+const MySwal = withReactContent(Swal);
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -66,26 +72,54 @@ const Dashboard = () => {
       setExpenses(response.data.expenses);
     } catch (error) {
       console.error('Failed to fetch expenses:', error);
+      MySwal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: 'Failed to fetch expenses. Please try again later.',
+      });
     }
   };
 
   const handleAddExpense = async (e) => {
     e.preventDefault();
     if (!newExpense.category || !newExpense.amount) {
-      alert('Please fill in all fields');
+      MySwal.fire({
+        icon: 'warning',
+        title: 'Incomplete Fields',
+        text: 'Please fill in all fields to add a new expense.',
+      });
       return;
     }
 
     try {
+      const token = localStorage.getItem('token');
       const response = await axios.post(`${backendUrl}/api/expenses/add`, {
         userId: user.id,
         category: newExpense.category,
         amount: parseFloat(newExpense.amount),
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
       });
       setExpenses([...expenses, response.data.expense]);
       setNewExpense({ category: '', amount: '' });
+      MySwal.fire({
+        icon: 'success',
+        title: 'Expense Added',
+        text: 'Your expense has been successfully added.',
+        timer: 2000,
+        showConfirmButton: false,
+      });
     } catch (error) {
       console.error('Failed to add expense:', error);
+      const errorMessage = error.response?.data?.message || 'Failed to add expense.';
+      MySwal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: errorMessage,
+      });
     }
   };
 
@@ -123,7 +157,7 @@ const Dashboard = () => {
     datasets: [
       {
         data: expenses.map((exp) => exp.amount),
-        backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'],
+        backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#C9CBCF'],
       },
     ],
   };
@@ -131,14 +165,16 @@ const Dashboard = () => {
   // Generate PDF report
   const generatePDFReport = () => {
     const doc = new jsPDF();
-    doc.text('Expense Report', 10, 10);
-    doc.text(`User: ${user?.fullName}`, 10, 20);
-    doc.text(`Total Spent: $${totalExpenses.toFixed(2)}`, 10, 30);
-    doc.text(`Report Type: ${filter.charAt(0).toUpperCase() + filter.slice(1)} Report`, 10, 40);
+    doc.setFontSize(20);
+    doc.text('Expense Report', 105, 20, null, null, 'center');
+    doc.setFontSize(12);
+    doc.text(`User: ${user?.fullName}`, 20, 40);
+    doc.text(`Total Spent: $${totalExpenses.toFixed(2)}`, 20, 50);
+    doc.text(`Report Type: ${filter.charAt(0).toUpperCase() + filter.slice(1)} Report`, 20, 60);
 
-    let y = 50;
+    let y = 70;
     expenses.forEach((expense, index) => {
-      doc.text(`${index + 1}. ${expense.category} - $${expense.amount}`, 10, y);
+      doc.text(`${index + 1}. ${expense.category} - $${expense.amount}`, 20, y);
       y += 10;
     });
 
@@ -146,7 +182,7 @@ const Dashboard = () => {
   };
 
   const handleScan = (result, error) => {
-    if (result && !scanHandled.current) {
+    if (result?.text && !scanHandled.current) {
       scanHandled.current = true;
       setScanResult(result.text);
       setEditedResult(result.text);
@@ -154,25 +190,55 @@ const Dashboard = () => {
       setShowScanner(false);
     }
     if (error && error.name !== 'NotFoundException') {
-      setError('');
+      // Handle specific errors
+      if (error.name === 'NotAllowedError') {
+        setError('Camera access was denied. Please allow camera permissions and try again.');
+      } else if (error.name === 'NotFoundError') {
+        setError('No camera device found. Please connect a camera and try again.');
+      } else {
+        setError('');
+      }
     }
   };
 
   const handleAddToDB = async () => {
     setIsAddingToDB(true);
     try {
-      const response = await axios.post(`${backendUrl}/api/scan`, {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${backendUrl}/api/expenses/scan`, {
+        userId: user.id,
         data: editedResult,
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
       });
       if (response.status === 201) {
-        alert('Data added to DB successfully!');
+        setExpenses([...expenses, response.data.expense]);
+        MySwal.fire({
+          icon: 'success',
+          title: 'Expense Added',
+          text: 'The scanned expense has been added successfully!',
+          timer: 2000,
+          showConfirmButton: false,
+        });
         handleCloseScanModal();
       } else {
-        alert(`Error: ${response.data.message}`);
+        MySwal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: response.data.message || 'Failed to add expense.',
+        });
       }
     } catch (err) {
       console.error(err);
-      alert('Failed to add data to DB.');
+      const errorMessage = err.response?.data?.message || 'Failed to add expense to the database.';
+      MySwal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: errorMessage,
+      });
     }
     setIsAddingToDB(false);
   };
@@ -190,6 +256,7 @@ const Dashboard = () => {
 
   const handleScannerClose = () => {
     setShowScanner(false);
+    setError('');
     scanHandled.current = false;
   };
 
@@ -243,17 +310,17 @@ const Dashboard = () => {
               handleAddExpense={handleAddExpense}
             />
             <div
-  className="position-absolute text-center"
-  style={{ top: '22px', right: '30px', cursor: 'pointer' }}
-  onClick={() => setShowScanner(true)}
->
-  <MdQrCodeScanner
-    size={30}
-    color="#007bff"
-    title="Scan QR Code"
-  />
-  <small style={{ display: 'block' }}>Scan QR Code</small>
-</div>
+              className="position-absolute text-center"
+              style={{ top: '22px', right: '30px', cursor: 'pointer' }}
+              onClick={() => setShowScanner(true)}
+            >
+              <MdQrCodeScanner
+                size={30}
+                color="#007bff"
+                title="Scan QR Code"
+              />
+              <small style={{ display: 'block' }}>Scan QR Code</small>
+            </div>
           </Col>
           <Col md={6}>
             <ExpenseOverview chartData={chartData} />
@@ -285,74 +352,123 @@ const Dashboard = () => {
       </Container>
 
       {/* Scanner Modal */}
-      <Modal show={showScanner} onHide={handleScannerClose} centered>
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.3 }}
-        >
-          <Modal.Header closeButton>
-            <Modal.Title>Scan QR Code</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            <QrReader
-              onResult={handleScan}
-              constraints={{ facingMode: 'environment' }}
-              style={{ width: '100%', borderRadius: '10px' }}
-            />
-            {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
-          </Modal.Body>
-        </motion.div>
-      </Modal>
+      <AnimatePresence>
+        {showScanner && (
+          <Modal
+            show={showScanner}
+            onHide={handleScannerClose}
+            centered
+            backdrop="static"
+            keyboard={false}
+            size="lg"
+            aria-labelledby="scanner-modal"
+            dialogClassName="scanner-modal"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.5 }}
+              style={{ width: '100%', height: '100%' }}
+            >
+              <Modal.Header closeButton>
+                <Modal.Title id="scanner-modal">Scan QR Code</Modal.Title>
+              </Modal.Header>
+              <Modal.Body className="d-flex justify-content-center align-items-center p-0">
+                <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+                  <QrReader
+                    onResult={handleScan}
+                    constraints={{ facingMode: 'environment' }}
+                    containerStyle={{ width: '100%', height: '100%' }}
+                    videoStyle={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '10px' }}
+                  />
+                  {error && (
+                    <Alert variant="danger" className="position-absolute top-0 w-100 text-center">
+                      {error}
+                    </Alert>
+                  )}
+                </div>
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="secondary" onClick={handleScannerClose}>
+                  Cancel
+                </Button>
+              </Modal.Footer>
+            </motion.div>
+          </Modal>
+        )}
+      </AnimatePresence>
 
       {/* Scan Result Modal */}
-      <Modal show={showScanModal} onHide={handleCloseScanModal} centered>
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.3 }}
-        >
-          <Modal.Header closeButton>
-            <Modal.Title>Scan Result</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            {isEditing ? (
-              <Form>
-                <Form.Group controlId="formScanResult">
-                  <Form.Label>Edit Scan Result</Form.Label>
-                  <Form.Control
-                    as="textarea"
-                    rows={3}
-                    value={editedResult}
-                    onChange={(e) => setEditedResult(e.target.value)}
-                  />
-                </Form.Group>
-              </Form>
-            ) : (
-              <p>{scanResult}</p>
-            )}
-          </Modal.Body>
-          <Modal.Footer>
-            {isEditing ? (
-              <Button variant="success" onClick={handleAddToDB} disabled={isAddingToDB}>
-                {isAddingToDB ? <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" /> : 'Add to DB'}
-              </Button>
-            ) : (
-              <>
-                <Button variant="primary" onClick={handleEdit}>
-                  Edit
-                </Button>
-                <Button variant="success" onClick={handleAddToDB}>
-                  Add to DB
-                </Button>
-              </>
-            )}
-            <Button variant="secondary" onClick={handleCloseScanModal}>
-              Close
-            </Button>
-          </Modal.Footer>
-        </motion.div>
-      </Modal>
+      <AnimatePresence>
+        {showScanModal && (
+          <Modal
+            show={showScanModal}
+            onHide={handleCloseScanModal}
+            centered
+            backdrop="static"
+            keyboard={false}
+            size="md"
+            aria-labelledby="scan-result-modal"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: -50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -50 }}
+              transition={{ duration: 0.5 }}
+            >
+              <Modal.Header>
+                <Modal.Title id="scan-result-modal">Scan Result</Modal.Title>
+              </Modal.Header>
+              <Modal.Body>
+                {isEditing ? (
+                  <Form>
+                    <Form.Group controlId="formScanResult">
+                      <Form.Label>Edit Scan Result</Form.Label>
+                      <Form.Control
+                        as="textarea"
+                        rows={3}
+                        value={editedResult}
+                        onChange={(e) => setEditedResult(e.target.value)}
+                      />
+                    </Form.Group>
+                  </Form>
+                ) : (
+                  <p>{scanResult}</p>
+                )}
+              </Modal.Body>
+              <Modal.Footer>
+                {isEditing ? (
+                  <Button variant="success" onClick={handleAddToDB} disabled={isAddingToDB}>
+                    {isAddingToDB ? (
+                      <>
+                        <Spinner
+                          as="span"
+                          animation="border"
+                          size="sm"
+                          role="status"
+                          aria-hidden="true"
+                        /> Adding...
+                      </>
+                    ) : (
+                      'Add to DB'
+                    )}
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="primary" onClick={handleEdit}>
+                      Edit
+                    </Button>
+                    <Button variant="success" onClick={handleAddToDB}>
+                      Add to DB
+                    </Button>
+                  </>
+                )}
+              </Modal.Footer>
+            </motion.div>
+          </Modal>
+        )}
+      </AnimatePresence>
     </>
   );
 };
