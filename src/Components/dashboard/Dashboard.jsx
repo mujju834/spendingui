@@ -460,7 +460,7 @@ const Dashboard = () => {
                       Edit
                     </Button>
                     <Button variant="success" onClick={handleAddToDB}>
-                      Add to DB
+                      Update Expense
                     </Button>
                   </>
                 )}
